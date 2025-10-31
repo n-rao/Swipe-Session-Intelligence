@@ -10,6 +10,14 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pickle
+import os
+from contextlib import suppress
+
+# Optional imports for auto-generation on Streamlit Cloud
+with suppress(Exception):
+    from generate_data import generate_synthetic_data
+with suppress(Exception):
+    from analyze_swipe_sessions import SwipeSessionAnalyzer
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -160,25 +168,89 @@ st.markdown("""
 
 @st.cache_data
 def load_data(data_file='swipe_session_data.csv'):
-    """Load session data."""
-    try:
-        df = pd.read_csv(data_file)
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        return df
-    except FileNotFoundError:
-        st.error(f"❌ Data file '{data_file}' not found. Please run `python generate_data.py` first.")
-        st.stop()
+    """Load session data, auto-generate robustly if missing."""
+    if not os.path.exists(data_file):
+        with st.spinner("Generating synthetic data (first-run)..."):
+            generated = False
+            # 1) Use in-process generator if available
+            try:
+                if 'generate_synthetic_data' in globals():
+                    generate_synthetic_data(n_users=int(os.getenv('SSI_USERS', 3000)),
+                                            days=int(os.getenv('SSI_DAYS', 14)),
+                                            output_file=data_file)
+                    generated = True
+            except Exception:
+                pass
+            # 2) Fallback: run the script
+            if not generated:
+                try:
+                    exit_code = os.system('python generate_data.py')
+                    if exit_code == 0 and os.path.exists(data_file):
+                        generated = True
+                except Exception:
+                    pass
+            # 3) Last-resort: create a tiny synthetic dataset inline
+            if not generated:
+                try:
+                    now = pd.Timestamp.utcnow().normalize()
+                    tiny = pd.DataFrame({
+                        'user_id': [1, 2, 1],
+                        'session_id': [1, 2, 3],
+                        'timestamp': [now, now, now],
+                        'swipes': [10, 20, 15],
+                        'likes': [2, 3, 2],
+                        'matches': [1, 1, 0],
+                        'messages_sent': [1, 0, 0],
+                        'session_length_minutes': [5.0, 7.5, 3.2],
+                        'app_version': ['2.3.0', '2.3.0', '2.3.0'],
+                        'gender': ['F', 'M', 'F'],
+                        'age': [26, 29, 26],
+                        'location': ['New York', 'Chicago', 'New York'],
+                        'day_of_week': [now.strftime('%A')]*3
+                    })
+                    tiny.to_csv(data_file, index=False)
+                    generated = True
+                except Exception:
+                    pass
+            if not generated:
+                st.error("❌ Could not generate data automatically. Please refresh or provide 'swipe_session_data.csv'.")
+                st.stop()
+    df = pd.read_csv(data_file)
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    return df
 
 @st.cache_data
 def load_results(results_file='analysis_results.pkl'):
-    """Load analysis results."""
-    try:
-        with open(results_file, 'rb') as f:
-            results = pickle.load(f)
-        return results
-    except FileNotFoundError:
-        st.warning(f"⚠️ Results file '{results_file}' not found. Running analysis...")
-        return None
+    """Load analysis results, compute if missing with multiple fallbacks."""
+    if not os.path.exists(results_file):
+        ran = False
+        # 1) In-process analyzer
+        try:
+            if 'SwipeSessionAnalyzer' in globals():
+                with st.spinner("Running analysis & ML (first-run)..."):
+                    analyzer = SwipeSessionAnalyzer('swipe_session_data.csv')
+                    analyzer.calculate_kpis()
+                    analyzer.analyze_funnel()
+                    analyzer.segment_users(n_clusters=3)
+                    analyzer.predict_match_success(use_xgboost=None)
+                    analyzer.generate_insights()
+                    analyzer.save_results(results_file)
+                    ran = True
+        except Exception:
+            pass
+        # 2) Run the script as fallback
+        if not ran:
+            try:
+                os.system('python analyze_swipe_sessions.py')
+                ran = os.path.exists(results_file)
+            except Exception:
+                pass
+        if not ran:
+            st.warning("⚠️ Analysis results unavailable; dashboard will show limited insights.")
+            return None
+    with open(results_file, 'rb') as f:
+        results = pickle.load(f)
+    return results
 
 def calculate_realtime_kpis(df_filtered):
     """Calculate KPIs from filtered data."""
