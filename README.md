@@ -1,4 +1,4 @@
-# 💘 Swipe Session Intelligence
+# Swipe Session Intelligence
 
 A comprehensive end-to-end project simulating user behavioral analytics for a dating app, inspired by Bumble. This project demonstrates product data science workflows including data simulation, exploratory analysis, KPI calculation, user segmentation, predictive modeling, and interactive dashboard creation.
 
